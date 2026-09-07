@@ -435,7 +435,8 @@ class Supervisor:
     def old_route(self, r, t, paths):
         if protocol(r) not in ("3", "boot"):
             return False
-        pairs = sorted((p.get("gateway") or "", p["dev"]) for p in paths)
+        # Même ordre que discover() et public_routes() : priorité des defaults.
+        pairs = [(p.get("gateway") or "", p["dev"]) for p in paths]
         key = (r.get("gateway") or "", r.get("dev"))
         if key not in pairs:
             return False

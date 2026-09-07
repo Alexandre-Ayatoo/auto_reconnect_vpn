@@ -296,6 +296,30 @@ class AsyncTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, "non gérée"):
             s.check_public_conflicts([dict(legacy, protocol=4)], [p])
 
+    async def test_legacy_adoption_uses_physical_priority_order(self):
+        paths = v.discover([physical("10.44.0.1", "enp3s0", 150),
+                            physical("169.254.254.5", "nas254003", 100)])
+        tunnels = [dict(t, underlay_base=2) for t in v.TUNNELS]
+        legacy = [dict(dst=t["peer"], gateway=p["gateway"], dev=p["dev"],
+                       metric=2 + i, protocol="3")
+                  for t in tunnels for i, p in enumerate(paths)]
+        kernel = FakeKernel(paths + legacy)
+        with patch.object(v, "TUNNELS", tunnels), patch.object(v, "command", kernel.command):
+            s = v.Supervisor()
+            s.check_public_conflicts(kernel.routes, paths)
+            for changed in (dict(legacy[0], protocol="4"),
+                            dict(legacy[0], metric=3),
+                            dict(legacy[0], gateway="192.0.2.99")):
+                with self.assertRaisesRegex(RuntimeError, "non gérée"):
+                    s.check_public_conflicts([changed], paths)
+            await s.public_routes(kernel.routes[:], paths)
+        adopted = [r for r in kernel.routes if v.destination(r) != "default"]
+        self.assertEqual(len(adopted), 4)
+        self.assertTrue(all(str(r["protocol"]) == "186" for r in adopted))
+        self.assertEqual({(r["dev"], r["metric"]) for r in adopted},
+                         {("nas254003", 2), ("enp3s0", 3)})
+        self.assertEqual(kernel.routes[:2], paths)
+
     async def test_defaults_initial_learning_failure_and_restore(self):
         physical_route = physical()
         kernel = FakeKernel([physical_route, dict(dst="default", dev="ppp001001", protocol="boot")])
