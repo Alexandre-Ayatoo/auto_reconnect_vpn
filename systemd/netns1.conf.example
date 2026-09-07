@@ -1,0 +1,6 @@
+[Service]
+ExecStart=
+ExecStart=/usr/bin/ip netns exec netns1 /usr/bin/python3 /usr/local/bin/vpn_supervisor.py --config /etc/auto-reconnect-vpn.json --run
+Restart=always
+RestartSec=10
+User=root

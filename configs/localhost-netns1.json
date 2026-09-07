@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "expected_netns": "netns1",
+  "check_interval": 2.0,
+  "underlay_health_enabled": true,
+  "underlay_failure_action": "none",
+  "xl2tpd_pidfiles": ["/run/xl2tpd.pid"],
+  "full_ipsec_after": 3,
+  "tunnels": [
+    {
+      "name": "l2tp-ipsec-vpn",
+      "session": "myvpn",
+      "iface": "ppp001001",
+      "peer": "51.75.129.106",
+      "target": "203.0.113.251",
+      "metric": 0,
+      "underlay_base": 100,
+      "manage_default": true
+    },
+    {
+      "name": "l2tp-ipsec-vpn-2",
+      "session": "myvpn-2",
+      "iface": "ppp001002",
+      "peer": "51.75.129.105",
+      "target": "203.0.113.252",
+      "metric": 2,
+      "underlay_base": 200,
+      "manage_default": true
+    }
+  ]
+}
