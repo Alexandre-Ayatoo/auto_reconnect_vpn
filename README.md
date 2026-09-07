@@ -11,6 +11,20 @@ installateur ne modifie automatiquement les routes ou les unités systemd.
 
 ## Les profils fournis
 
+### ayatooservs-vps-02
+
+`configs/ayatooservs-vps-02.json` reprend le script Bash de cette machine :
+interfaces `ppp254001` et `ppp254002`, gestion des defaults PPP désactivée,
+métriques underlay de base 100 et 200, intervalle de 5 secondes, seuil de
+3 échecs et cooldown de 60 secondes. Les listes d'exclusions sont vides.
+Les peers écrits avec `/32` sont convertis en IPv4 sans suffixe.
+
+Le contrôle ICMP public reste activé, mais son action est `none` : les échecs
+sont journalisés sans supprimer les routes comme le faisait l'ancien Bash.
+Le contexte réseau courant est conservé ; le vérifier avec `--check --require-up`
+dans le contexte du service avant la bascule. Utiliser ce profil comme source
+à la place de `/tmp/auto-reconnect-vpn.json` dans les instructions ci-dessous.
+
 ### new-8-Alexandre-LE-BODIC
 
 Le fichier `configs/new-8-Alexandre-LE-BODIC.json` est converti depuis le script

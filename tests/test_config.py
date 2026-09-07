@@ -112,6 +112,24 @@ log()''').replace("UNDERLAY_MAX_FAILED_PINGS=3", "UNDERLAY_MAX_FAILED_PINGS=7")
         self.assertEqual(cfg["failed_probes"], 3)
         self.assertEqual(cfg["expected_netns"], "vpn-test")
 
+    def test_array_comments_with_parenthesized_examples(self):
+        for values in ('', '"192.0.2.1"'):
+            with self.subTest(values=values):
+                source = BSM.replace('log()', '''UNDERLAY_EXCLUDE_GWS=(%s) # ex: ("10.44.0.1" "192.0.2.1")
+UNDERLAY_EXCLUDE_DEVS=() # ex: ("eth2" "br1")
+UNDERLAY_EXCLUDE_GWDEV=() # ex: ("10.44.0.1@eth2")
+log()''' % values)
+                cfg, _ = converter.convert(source, "")
+                self.assertEqual(cfg["exclude_gws"], ["192.0.2.1"] if values else [])
+                self.assertEqual(cfg["exclude_devs"], [])
+                self.assertEqual(cfg["exclude_gwdev"], [])
+
+    def test_array_trailing_commands_and_multiline_are_rejected(self):
+        for raw in ('() ; touch /tmp/should-not-run', '("192.0.2.1"\n)',
+                    '("$(hostname)")'):
+            with self.subTest(raw=raw), self.assertRaises(ValueError):
+                converter.assignments('UNDERLAY_EXCLUDE_GWS=' + raw)
+
     def test_import_requires_explicit_namespace_and_does_not_overwrite(self):
         with tempfile.TemporaryDirectory() as tmp:
             source, dest = Path(tmp) / "old.sh", Path(tmp) / "config.json"

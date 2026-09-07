@@ -53,8 +53,9 @@ def assignments(source):
         if key in result:
             raise ValueError("affectation répétée, à vérifier manuellement : " + key)
         if key in ARRAYS:
+            # Ne pas absorber les parenthèses des exemples dans le commentaire.
             # La parenthèse fermante doit être suivie uniquement d'un commentaire.
-            array = re.fullmatch(r"\((.*)\)\s*(?:#.*)?", raw)
+            array = re.fullmatch(r"\((.*?)\)\s*(?:#.*)?", raw)
             if not array:
                 raise ValueError("tableau non littéral ou multiligne : " + key)
             raw = array.group(1)
