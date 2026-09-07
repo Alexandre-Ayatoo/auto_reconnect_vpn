@@ -9,7 +9,38 @@ Ce paquet n'écrase pas l'ancien `auto_reconnect_vpn.py` : le nouveau nom permet
 de préparer et vérifier la migration avant de changer le service. Aucun
 installateur ne modifie automatiquement les routes ou les unités systemd.
 
-## Les deux profils fournis
+## Les profils fournis
+
+### new-8-Alexandre-LE-BODIC
+
+Le fichier `configs/new-8-Alexandre-LE-BODIC.json` est converti depuis le script
+Bash fourni pour cette machine. Il reprend `ppp254001` et `ppp254002`, les
+defaults PPP activées avec les métriques 0 et 2, les métriques underlay de base
+2 pour les deux peers, une cadence de 5 secondes, 3 échecs avant reconnexion et
+un cooldown de 60 secondes. Le contrôle ICMP public et les relances IPsec
+forcées sont désactivés.
+
+`expected_netns: ""` conserve le contexte d'exécution du service existant ;
+le prompt `(default)` ne suffit pas à confirmer celui-ci. Vérifier l'unité avec
+`systemctl cat auto_reconnect_vpn.service` avant de choisir le drop-in décrit
+plus bas. La reprise des defaults attend deux succès ; le nouveau superviseur
+retire également les defaults PPP des tunnels déclarés en panne.
+
+Depuis le dépôt sur la machine cible, valider puis diagnostiquer dans le même
+contexte réseau que le service existant (préfixer le diagnostic avec
+`ip netns exec NOM` si nécessaire) :
+
+```bash
+python3 vpn_supervisor.py --config configs/new-8-Alexandre-LE-BODIC.json --validate-config
+python3 vpn_supervisor.py --config configs/new-8-Alexandre-LE-BODIC.json --check --require-up
+```
+
+Les defaults physiques doivent avoir une métrique supérieure à 2 ; le
+diagnostic vérifie cette contrainte. Après validation, suivre l'installation
+ci-dessous en utilisant `configs/new-8-Alexandre-LE-BODIC.json` comme source
+à la place de `/tmp/auto-reconnect-vpn.json`.
+
+### localhost-netns1 et rt-bsm-1
 
 | Paramètre | `localhost-netns1.json` | `rt-bsm-1.json` |
 |---|---|---|
