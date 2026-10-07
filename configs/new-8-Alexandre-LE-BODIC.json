@@ -6,9 +6,23 @@
       "name": "l2tp-ipsec-vpn",
       "session": "myvpn",
       "iface": "ppp254001",
-      "peer": "51.75.129.106",
+      "peer": "51.75.129.105",
       "target": "203.0.113.251",
-      "underlay_base": 2,
+      "underlay_base": 1,
+      "underlay_paths": [
+        {
+          "gateway": "169.254.254.5",
+          "dev": "nas254003"
+        },
+        {
+          "gateway": "169.254.254.7",
+          "dev": "nas254003"
+        },
+        {
+          "gateway": "10.44.0.1",
+          "dev": "br1"
+        }
+      ],
       "manage_default": true,
       "metric": 0
     },
@@ -16,9 +30,23 @@
       "name": "l2tp-ipsec-vpn-2",
       "session": "myvpn-2",
       "iface": "ppp254002",
-      "peer": "51.75.129.105",
+      "peer": "51.75.129.106",
       "target": "203.0.113.252",
-      "underlay_base": 2,
+      "underlay_base": 1,
+      "underlay_paths": [
+        {
+          "gateway": "169.254.254.7",
+          "dev": "nas254003"
+        },
+        {
+          "gateway": "169.254.254.5",
+          "dev": "nas254003"
+        },
+        {
+          "gateway": "10.44.0.1",
+          "dev": "br1"
+        }
+      ],
       "manage_default": true,
       "metric": 2
     }

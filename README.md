@@ -230,6 +230,7 @@ changements de configuration réseau effectués séparément.
 | `tunnels[].manage_default` | booléen JSON : `false` interdit toute gestion explicite de sa default |
 | `tunnels[].metric` | métrique de default, utilisée uniquement si sa gestion est activée |
 | `tunnels[].underlay_base` | base des métriques /32 pour ce serveur |
+| `tunnels[].underlay_paths` | liste facultative de couples `gateway` / `dev`, dans l'ordre de préférence propre au tunnel |
 | `underlay_health_enabled` | activer les pings des IP publiques |
 | `underlay_failure_action` | `none` pour journaliser ; `penalize` uniquement si ce test est pertinent |
 | `failed_probes` / `successful_probes` | seuils PPP, 3 échecs / 2 succès par défaut |
@@ -241,6 +242,47 @@ changements de configuration réseau effectués séparément.
 | `charon_pidfiles` / `xl2tpd_pidfiles` | listes de chemins candidats pour identifier les démons |
 | `start_stopped_services` | désactivé par défaut ; ne l'activer qu'avec des unités système vérifiées |
 | `route_protocol` | identifiant numérique à réserver dans ce namespace, 186 par compatibilité |
+
+### Choisir les chemins de chaque tunnel
+
+Chaque tunnel peut définir `underlay_paths`. Seuls les chemins de cette liste
+sont utilisés pour son `peer`, avec une métrique `underlay_base + position`
+(la première position vaut 0). Sans ce champ, le comportement reste la
+découverte automatique de tous les accès, dans l'ordre des métriques des
+routes par défaut physiques. La liste doit contenir de 1 à 99 chemins distincts.
+
+Exemple pour le tunnel vers `51.75.129.106` :
+
+```json
+"underlay_base": 1,
+"underlay_paths": [
+  {"gateway": "169.254.254.7", "dev": "nas254003"},
+  {"gateway": "169.254.254.5", "dev": "nas254003"},
+  {"gateway": "10.44.0.1", "dev": "br1"}
+]
+```
+
+Ses /32 auront les métriques 1 via `.7`, 2 via `.5` et 3 via `br1`.
+Le tunnel vers `.105` préfère `.5`, puis `.7`, puis `br1`, avec les mêmes
+métriques 1, 2 et 3 : voir
+[`configs/new-8-Alexandre-LE-BODIC.json`](configs/new-8-Alexandre-LE-BODIC.json).
+Ce profil associe `l2tp-ipsec-vpn` à `.105` et `l2tp-ipsec-vpn-2` à `.106`.
+Les connexions strongSwan et les sessions xl2tpd doivent correspondre à ces
+serveurs ; le superviseur ne modifie pas leur configuration.
+
+Un chemin doit correspondre à une route par défaut physique découverte
+(même passerelle et même interface) et respecter les exclusions globales.
+Les routes /32 existantes ne servent pas à découvrir les chemins. Si une
+default disparaît, sa /32 gérée est retirée et les autres conservent leur
+métrique ; elle est recréée lorsque la default revient. Si aucun chemin
+autorisé n'est disponible, une /32 `unreachable` empêche le serveur VPN de
+retomber dans une default PPP et aucune reconnexion n'est lancée pour ce
+tunnel. Le contrôle initial `--check` ou `--run` refuse de démarrer si un
+tunnel n'a aucun chemin autorisé disponible.
+
+Avec `underlay_health_enabled: false`, une panne distante qui laisse la route
+présente ne déclenche pas de pénalisation. La limitation des sondes lorsque
+plusieurs passerelles partagent la même interface reste applicable.
 
 La table de routage gérée reste `main` en IPv4. Aucune route par défaut physique
 n'est réécrite. Si des defaults PPP sont gérées, les defaults concurrentes

@@ -117,7 +117,8 @@ def validate_config(data):
         raise ValueError("au moins un tunnel est requis")
     required = {"name", "session", "iface", "peer", "target", "metric", "underlay_base", "manage_default"}
     for i, t in enumerate(cfg["tunnels"]):
-        if not isinstance(t, dict) or set(t) != required:
+        if (not isinstance(t, dict) or not required <= set(t)
+                or set(t) - required - {"underlay_paths"}):
             raise ValueError("tunnel %s : clés attendues %s" % (i, sorted(required)))
         for key in ("name", "session", "iface"):
             if not isinstance(t[key], str) or not re.fullmatch(r"[A-Za-z0-9_.-]+", t[key]):
@@ -133,6 +134,25 @@ def validate_config(data):
         for key in ("metric", "underlay_base"):
             if type(t[key]) is not int or not 0 <= t[key] <= 4294967295 - cfg["underlay_penalty"] - 100:
                 raise ValueError(key + " : métrique invalide")
+        if "underlay_paths" in t:
+            paths = t["underlay_paths"]
+            if not isinstance(paths, list) or not 0 < len(paths) < 100:
+                raise ValueError("underlay_paths : liste de 1 à 99 chemins attendue")
+            seen = set()
+            for p in paths:
+                if not isinstance(p, dict) or set(p) != {"gateway", "dev"}:
+                    raise ValueError("underlay_paths : clés gateway et dev attendues")
+                if not isinstance(p["gateway"], str):
+                    raise ValueError("underlay_paths : gateway doit être une IPv4 en chaîne")
+                ipaddress.IPv4Address(p["gateway"])
+                if (not isinstance(p["dev"], str) or
+                        not re.fullmatch(r"[A-Za-z0-9_.:@-]+", p["dev"]) or
+                        len(p["dev"].encode()) > 15 or p["dev"].startswith("ppp")):
+                    raise ValueError("underlay_paths : interface physique invalide")
+                pair = (p["gateway"], p["dev"])
+                if pair in seen:
+                    raise ValueError("underlay_paths : chemin dupliqué")
+                seen.add(pair)
     for key in ("name", "session", "iface", "peer"):
         if len({t[key] for t in cfg["tunnels"]}) != len(cfg["tunnels"]):
             raise ValueError("tunnels : " + key + " dupliqué")
@@ -265,6 +285,16 @@ def discover(routes):
         raise RuntimeError("plusieurs passerelles sur une interface : ping -I ne les distingue pas ; "
                            "exclure un couple ou désactiver UNDERLAY_HEALTH_ENABLED")
     return result
+
+
+def tunnel_paths(t, paths):
+    """Chemins disponibles et rangs propres au tunnel, stables lors d'une disparition."""
+    if "underlay_paths" not in t:
+        return list(enumerate(paths))
+    available = {(p.get("gateway"), p["dev"]): p for p in paths}
+    return [(i, available[(p["gateway"], p["dev"])])
+            for i, p in enumerate(t["underlay_paths"])
+            if (p["gateway"], p["dev"]) in available]
 
 
 def check_default_priority(routes):
@@ -481,7 +511,7 @@ class Supervisor:
         self.check_public_conflicts(routes, paths)
         for t in TUNNELS:
             desired = []
-            for i, p in enumerate(paths):
+            for i, p in tunnel_paths(t, paths):
                 key = (t["peer"], p.get("gateway"), p["dev"])
                 if key not in self.underlay:
                     penalized = any(self.scoped(r, t, paths) and r.get("gateway") == p.get("gateway")
@@ -631,13 +661,14 @@ class Supervisor:
         for t, sa_ok in zip(TUNNELS, results):
             name = t["name"]
             task = self.recovery.get(name)
-            if (paths and public_ready and not errors and self.health[name].bad >= FAILED_PROBES
+            if (tunnel_paths(t, paths) and public_ready and not errors and self.health[name].bad >= FAILED_PROBES
                     and (task is None or task.done())
                     and time.monotonic() >= self.next_recovery.get(name, 0)):
                 self.recovery[name] = asyncio.create_task(self.reconnect(t, sa_ok))
         if UNDERLAY_HEALTH_ENABLED and now - self.last_underlay >= UNDERLAY_CHECK_EVERY:
             self.last_underlay = now
-            results = await asyncio.gather(*(self.probe_path(t, p) for t in TUNNELS for p in paths),
+            results = await asyncio.gather(*(self.probe_path(t, p) for t in TUNNELS
+                                             for _, p in tunnel_paths(t, paths)),
                                            return_exceptions=True)
             for result in results:
                 if isinstance(result, Exception):
@@ -702,6 +733,12 @@ async def preflight(supervisor, diagnostic, require_up=False):
     supervisor.check_public_conflicts(routes, paths)
     if not paths:
         raise RuntimeError("aucune default underlay utilisable ; configurer le réseau avant lancement")
+    for t in TUNNELS:
+        selected = tunnel_paths(t, paths)
+        if not selected:
+            raise RuntimeError("aucune default underlay autorisée utilisable pour " + t["name"])
+        LOG.info("%s : accès autorisés=%s", t["name"],
+                 [(p.get("gateway"), p["dev"], t["underlay_base"] + i) for i, p in selected])
     LOG.info("Accès détectés : %s", [(p.get("gateway"), p["dev"], p.get("metric", 0)) for p in paths])
     LOG.info("Commande ping : %s", shutil.which("ping"))
     errors = daemon_context()

@@ -1,3 +1,4 @@
+import asyncio
 import copy
 import importlib.util
 import json
@@ -46,6 +47,25 @@ while true; do destructive_command; done
 
 
 class ConfigTests(unittest.TestCase):
+    def test_underlay_paths_validation(self):
+        cfg, _ = converter.convert(BSM, "")
+        valid = [{"gateway": "169.254.254.7", "dev": "nas254003"},
+                 {"gateway": "10.44.0.1", "dev": "br1"}]
+        cfg["tunnels"][0]["underlay_paths"] = valid
+        self.assertEqual(v.validate_config(cfg)["tunnels"][0]["underlay_paths"], valid)
+        invalid = [None, [], "auto", valid * 2, valid * 50,
+                   [{"gateway": "invalid", "dev": "eth0"}],
+                   [{"gateway": 123, "dev": "eth0"}],
+                   [{"gateway": "192.0.2.1", "dev": "ppp0"}],
+                   [{"gateway": "192.0.2.1", "dev": "eth0;cmd"}],
+                   [{"gateway": "192.0.2.1", "dev": "x" * 16}],
+                   [{"gateway": "192.0.2.1"}],
+                   [dict(valid[0], metric=2)]]
+        for paths in invalid:
+            with self.subTest(paths=paths), self.assertRaises(ValueError):
+                cfg["tunnels"][0]["underlay_paths"] = paths
+                v.validate_config(cfg)
+
     def test_pidfile_candidates_accept_one_valid_daemon_and_reject_ambiguity(self):
         def read(path, *args, **kwargs):
             values = {"/run/charon.pid": "100", "/run/xl2tpd.pid": "200",
@@ -182,6 +202,111 @@ class RuntimeConfigTests(unittest.IsolatedAsyncioTestCase):
         managed = [r for r in kernel.routes if v.destination(r) != "default"]
         self.assertEqual(len(managed), 2)
         self.assertEqual([r["metric"] for r in managed], [2, 2])
+
+    async def test_per_tunnel_order_exclusions_and_path_return(self):
+        v.load_config(ROOT / "configs/new-8-Alexandre-LE-BODIC.json")
+        a = physical("169.254.254.5", "nas254003", 10)
+        b = physical("169.254.254.7", "nas254003", 20)
+        c = physical("10.44.0.1", "br1", 30)
+        extra = physical("192.0.2.1", "eth0", 40)
+        kernel = FakeKernel([a, b, c, extra])
+        s = v.Supervisor()
+
+        def managed(peer):
+            return sorted((r.get("gateway"), r.get("dev"), r["metric"])
+                          for r in kernel.routes if v.destination(r) == peer + "/32")
+
+        with patch.object(v, "command", kernel.command):
+            await s.public_routes(kernel.routes[:], v.discover(kernel.routes))
+            self.assertEqual(managed("51.75.129.106"),
+                             [("10.44.0.1", "br1", 3), ("169.254.254.5", "nas254003", 2),
+                              ("169.254.254.7", "nas254003", 1)])
+            self.assertEqual(managed("51.75.129.105"),
+                             [("10.44.0.1", "br1", 3), ("169.254.254.5", "nas254003", 1),
+                              ("169.254.254.7", "nas254003", 2)])
+            # Exclure .5 du second tunnel retire seulement sa route vers .106.
+            v.TUNNELS[1]["underlay_paths"].pop(1)
+            # Le retrait de .7 conserve les rangs des chemins restants.
+            kernel.routes.remove(b)
+            await s.public_routes(kernel.routes[:], v.discover(kernel.routes))
+            self.assertEqual(managed("51.75.129.106"), [("10.44.0.1", "br1", 2)])
+            self.assertEqual(managed("51.75.129.105"),
+                             [("10.44.0.1", "br1", 3), ("169.254.254.5", "nas254003", 1)])
+            kernel.routes.append(b)
+            await s.public_routes(kernel.routes[:], v.discover(kernel.routes))
+            self.assertIn(("169.254.254.7", "nas254003", 1), managed("51.75.129.106"))
+            # Aucun chemin autorisé : ne pas utiliser la default eth0 restante.
+            kernel.routes = [r for r in kernel.routes if r not in (a, b, c)]
+            await s.public_routes(kernel.routes[:], v.discover(kernel.routes))
+            for peer in ("51.75.129.105", "51.75.129.106"):
+                routes = [r for r in kernel.routes if v.destination(r) == peer + "/32"]
+                self.assertEqual(len(routes), 1)
+                self.assertEqual(routes[0]["type"], "unreachable")
+            kernel.routes.extend([a, b, c])
+            await s.public_routes(kernel.routes[:], v.discover(kernel.routes))
+            self.assertEqual(len(managed("51.75.129.105")), 3)
+            self.assertEqual(len(managed("51.75.129.106")), 2)
+        self.assertEqual([r for r in kernel.routes if v.destination(r) == "default"],
+                         [extra, a, b, c])
+
+    async def test_config_change_removes_managed_paths_and_preserves_legacy_adoption(self):
+        v.load_config(ROOT / "configs/rt-bsm-1.json")
+        paths = [physical("169.254.254.5", "nas254003", 10),
+                 physical("169.254.254.7", "nas254003", 20),
+                 physical("10.44.0.1", "br1", 30)]
+        legacy = [dict(dst=t["peer"] + "/32", gateway=p["gateway"], dev=p["dev"],
+                       metric=t["underlay_base"] + i, protocol="boot")
+                  for t in v.TUNNELS for i, p in enumerate(paths)]
+        kernel = FakeKernel(paths + legacy)
+        v.load_config(ROOT / "configs/new-8-Alexandre-LE-BODIC.json")
+        # Les routes boot ne sont reprises qu'à la base historique configurée.
+        for t in v.TUNNELS:
+            t["underlay_base"] = 2
+        with patch.object(v, "command", kernel.command):
+            await v.Supervisor().public_routes(kernel.routes[:], paths)
+        managed = [r for r in kernel.routes if v.destination(r) != "default"]
+        self.assertEqual(len(managed), 6)
+        self.assertTrue(all(r["protocol"] == str(v.ROUTE_PROTOCOL) for r in managed))
+        # Revenir à la découverte automatique avant de restreindre à nouveau.
+        v.load_config(ROOT / "configs/rt-bsm-1.json")
+        with patch.object(v, "command", kernel.command):
+            await v.Supervisor().public_routes(kernel.routes[:], paths)
+        v.load_config(ROOT / "configs/new-8-Alexandre-LE-BODIC.json")
+        v.TUNNELS[1]["underlay_paths"].pop(1)
+        with patch.object(v, "command", kernel.command):
+            await v.Supervisor().public_routes(kernel.routes[:], paths)
+        self.assertEqual(len([r for r in kernel.routes if v.destination(r) != "default"]), 5)
+
+    async def test_preflight_rejects_no_authorized_path_without_writes(self):
+        v.load_config(ROOT / "configs/new-8-Alexandre-LE-BODIC.json")
+        with patch.object(v, "ip_json", AsyncMock(return_value=[physical()])), \
+             patch.object(v, "command", AsyncMock()) as cmd:
+            with self.assertRaisesRegex(RuntimeError, "aucune default underlay autorisée"):
+                await v.preflight(v.Supervisor(), True)
+            cmd.assert_not_called()
+
+    async def test_cycle_probes_and_reconnects_only_authorized_available_paths(self):
+        v.load_config(ROOT / "configs/new-8-Alexandre-LE-BODIC.json")
+        v.TUNNELS[1]["underlay_paths"].pop(1)
+        v.UNDERLAY_HEALTH_ENABLED = True
+        a = physical("169.254.254.5", "nas254003", 10)
+        extra = physical("192.0.2.1", "eth0", 40)
+        kernel = FakeKernel([a, extra])
+        s = v.Supervisor()
+        for t in v.TUNNELS:
+            s.health[t["name"]] = v.Health(up=False, known=True, bad=v.FAILED_PROBES)
+        with patch.object(v, "ip_json", AsyncMock(side_effect=lambda *args: kernel.routes[:])), \
+             patch.object(v, "command", kernel.command), \
+             patch.object(v, "daemon_context", return_value=[]), \
+             patch.object(s, "probe_tunnel", AsyncMock(return_value=False)), \
+             patch.object(s, "defaults", AsyncMock()), \
+             patch.object(s, "probe_path", AsyncMock()) as probe, \
+             patch.object(s, "reconnect", AsyncMock()) as reconnect:
+            await s.cycle()
+            await asyncio.gather(*s.recovery.values())
+        probe.assert_awaited_once_with(v.TUNNELS[0], a)
+        reconnect.assert_awaited_once_with(v.TUNNELS[0], False)
+        self.assertEqual(list(s.recovery), [v.TUNNELS[0]["name"]])
 
     async def test_require_up_rejects_unhealthy_tunnels_without_writes(self):
         v.load_config(ROOT / "configs/rt-bsm-1.json")
