@@ -503,9 +503,14 @@ class Supervisor:
                 continue
             rc, _, err = await command("ip", "-4", "route", "del", *route_args(old),
                                        "proto", protocol(old) or "boot")
-            if rc and "No such process" not in err and "Cannot find device" not in err:
-                raise RuntimeError("suppression route échouée : " + err.strip())
-            LOG.info("Route retirée : %s", " ".join(route_args(old)))
+            if rc:
+                if "No such process" not in err and "Cannot find device" not in err:
+                    raise RuntimeError("suppression route échouée : " + err.strip())
+                continue
+            # Une route recréée à chaque cycle reste retirée, sans saturer le journal.
+            self.notice(("route-removed", route_key(old), protocol(old)),
+                        "Route retirée : %s proto %s" %
+                        (" ".join(route_args(old)), protocol(old) or "boot"))
 
     async def public_routes(self, routes, paths):
         self.check_public_conflicts(routes, paths)

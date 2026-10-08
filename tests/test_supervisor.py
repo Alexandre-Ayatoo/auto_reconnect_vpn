@@ -267,6 +267,31 @@ class AsyncTests(unittest.IsolatedAsyncioTestCase):
                                                [dict(dst="default", dev="eth0", metric=5000)])
         self.assertEqual(cmd.await_count, 1)
 
+    async def test_repeated_route_removal_logs_once_but_keeps_deleting(self):
+        old = dict(dst="51.75.129.106/32", gateway="10.44.0.1", dev="br1",
+                   metric=20, protocol=186)
+        s = v.Supervisor()
+        with patch.object(v, "command", AsyncMock(return_value=(0, "", ""))) as cmd, \
+             self.assertLogs(v.LOG, level="INFO") as logs:
+            for _ in range(3):
+                await s.reconcile([old], [])
+        self.assertEqual(cmd.await_count, 3)
+        self.assertEqual(len(logs.output), 1)
+        self.assertIn("proto 186", logs.output[0])
+
+    async def test_already_absent_route_is_not_logged_as_removed(self):
+        old = dict(dst="default", dev="ppp001001", protocol="boot")
+        for detail in ("No such process", "Cannot find device"):
+            with patch.object(v, "command", AsyncMock(return_value=(2, "", detail))), \
+                 self.assertNoLogs(v.LOG, level="INFO"):
+                await v.Supervisor().reconcile([old], [])
+
+    async def test_route_removal_error_is_not_silenced(self):
+        old = dict(dst="default", dev="ppp001001", protocol="boot")
+        with patch.object(v, "command", AsyncMock(return_value=(2, "", "Operation not permitted"))):
+            with self.assertRaisesRegex(RuntimeError, "suppression route échouée"):
+                await v.Supervisor().reconcile([old], [])
+
     async def test_underlay_disappearance_and_rediscovery(self):
         p = physical()
         kernel = FakeKernel([p])
