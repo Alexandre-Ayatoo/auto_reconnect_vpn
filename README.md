@@ -266,7 +266,8 @@ Ses /32 auront les métriques 1 via `.7`, 2 via `.5` et 3 via `br1`.
 Le tunnel vers `.105` préfère `.5`, puis `.7`, puis `br1`, avec les mêmes
 métriques 1, 2 et 3 : voir
 [`configs/new-8-Alexandre-LE-BODIC.json`](configs/new-8-Alexandre-LE-BODIC.json).
-Ce profil associe `l2tp-ipsec-vpn` à `.105` et `l2tp-ipsec-vpn-2` à `.106`.
+Ce profil associe `l2tp-ipsec-vpn` / `myvpn` à `.106` (cible `.251`) et
+`l2tp-ipsec-vpn-2` / `myvpn-2` à `.105` (cible `.252`).
 Les connexions strongSwan et les sessions xl2tpd doivent correspondre à ces
 serveurs ; le superviseur ne modifie pas leur configuration.
 

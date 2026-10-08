@@ -224,8 +224,8 @@ class RuntimeConfigTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(managed("51.75.129.105"),
                              [("10.44.0.1", "br1", 3), ("169.254.254.5", "nas254003", 1),
                               ("169.254.254.7", "nas254003", 2)])
-            # Exclure .5 du second tunnel retire seulement sa route vers .106.
-            v.TUNNELS[1]["underlay_paths"].pop(1)
+            # Exclure .5 du tunnel vers .106 retire seulement sa route.
+            v.TUNNELS[0]["underlay_paths"].pop(1)
             # Le retrait de .7 conserve les rangs des chemins restants.
             kernel.routes.remove(b)
             await s.public_routes(kernel.routes[:], v.discover(kernel.routes))
@@ -287,7 +287,7 @@ class RuntimeConfigTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cycle_probes_and_reconnects_only_authorized_available_paths(self):
         v.load_config(ROOT / "configs/new-8-Alexandre-LE-BODIC.json")
-        v.TUNNELS[1]["underlay_paths"].pop(1)
+        v.TUNNELS[0]["underlay_paths"].pop(1)
         v.UNDERLAY_HEALTH_ENABLED = True
         a = physical("169.254.254.5", "nas254003", 10)
         extra = physical("192.0.2.1", "eth0", 40)
@@ -304,9 +304,9 @@ class RuntimeConfigTests(unittest.IsolatedAsyncioTestCase):
              patch.object(s, "reconnect", AsyncMock()) as reconnect:
             await s.cycle()
             await asyncio.gather(*s.recovery.values())
-        probe.assert_awaited_once_with(v.TUNNELS[0], a)
-        reconnect.assert_awaited_once_with(v.TUNNELS[0], False)
-        self.assertEqual(list(s.recovery), [v.TUNNELS[0]["name"]])
+        probe.assert_awaited_once_with(v.TUNNELS[1], a)
+        reconnect.assert_awaited_once_with(v.TUNNELS[1], False)
+        self.assertEqual(list(s.recovery), [v.TUNNELS[1]["name"]])
 
     async def test_require_up_rejects_unhealthy_tunnels_without_writes(self):
         v.load_config(ROOT / "configs/rt-bsm-1.json")
